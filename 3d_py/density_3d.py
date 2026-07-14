@@ -5,7 +5,7 @@ import ui_module as ui
 import mesh_struct as ms
 from itertools import combinations_with_replacement
 from scipy.sparse.linalg import spsolve, factorized
-from scipy.sparse import coo_matrix, bmat, csr_matrix
+from scipy.sparse import coo_matrix
 
 def barycentric_integral(density_element, p):
     """
@@ -158,9 +158,10 @@ def fem_solver(mesh, density, p):
 
         rhs_free = rhs[free_dofs] - K_fc @ fixed_values
 
-        u[free_dofs] = spsolve(K_ff.tocsr(), rhs_free)
+        u[free_dofs] = spsolve(K_ff, rhs_free)
 
     return u, K, rhs
+
 
 def dcompliance_drho(mesh, density, u, p):
     num_nodes = len(mesh.nodes)
@@ -274,8 +275,8 @@ def density_approach(mesh, volfrac, radius=None, p=3, max_iter=1000, init_design
 
         duration = 8.0 # duration of animation
         fps = int((iteration+1)/duration)
-        if outfile is not None: view.save_mp4(outfile, fps)
-        view.show_interactive(iso_value=0.5, wait=True)
+        # if outfile is not None: view.save_mp4(outfile, fps)
+        # view.show_interactive(iso_value=0.5, wait=True)
 
     log_data = [compliances, volume_fractions, densities, variations] if log else None
 
@@ -297,15 +298,59 @@ def oc(x, dc, dv, vol_target):
     return xnew
 
 if __name__ == "__main__":
+    p = 3
+    density = np.array([[0.2, 0.4, 0.7, 1.0], [0.1, 0.3, 0.5, 0.8]])
+    
+    print("\nTests for barycentric integral")
+    print(barycentric_integral(density, p))
+    print("\n")
+    
+    print("Tests for barycentric integral derivative")
+    print(barycentric_integral_derivative(density, p))
+    print("\n")
     if not gmsh.isInitialized():
         gmsh.initialize()
 
-    h = 0.04
+    h = 0.1
     volfrac = 0.10
     outfile = "outputs/to_3d.mp4"
-    mesh = ms.create_mbb_mesh(3.0, 1.0, h, -4000.0 * 9.81)
+    mesh = ms.create_mbb_mesh(3.0, 1.0, h, -4e6*9.81)
+    density = np.ones(len(mesh.nodes))
+    u, K, rhs = fem_solver(mesh, density, p)
+    
+    print(f"\nNumber of nodes: {len(mesh.nodes)}")
+    print(f"Number of DOFs: {3*len(mesh.nodes)}")
+    print(f"Number of DOFs per node: {3}")
+    print(f"K nnz: {K.nnz}\n")
+    ux = u[0::3]
+    uy = u[1::3]
+    uz = u[2::3]
+    print(f"max |u_x| = {np.linalg.norm(ux, np.inf):.3e}")
+    print(f"max |u_y| = {np.linalg.norm(uy, np.inf):.3e}")
+    print(f"max |u_z| = {np.linalg.norm(uz, np.inf):.3e}")
+    
+    print(f"Number of Dirichlet BC nodes: {len(mesh.dirichlet)}")
+    print(f"Number of Neumann BC nodes: {len(mesh.neumann)}\n")
+    
+    print(f"sum rhs x: {np.sum(rhs[0::3]):.3e}")
+    print(f"sum rhs y: {np.sum(rhs[1::3]):.3e}")
+    print(f"sum rhs z: {np.sum(rhs[2::3]):.3e}")
+    print(f"norm rhs: {np.linalg.norm(rhs):.3e}")
+    print("\n\n")
+    
+    expected_gravity = 0.0
 
-    density, iterations, u, rhs, logs = density_approach(mesh, volfrac, p=3, outfile=outfile, log=True, max_iter=1000)
+    for element, nodes in enumerate(mesh.elements):
+        mean_density = np.mean(density[nodes])
+        expected_gravity -= ms.rho_matter * ms.gravity * mesh.volumes[element] * mean_density
+
+    print(f"expected gravity   = {expected_gravity:.3e}")
+    print(f"actual gravity     = {np.sum(rhs[2::3]) - sum(c[3] for c in mesh.neumann):.3e}")
+    
+    print(f"\nmax |K_ij| = {np.max(np.abs(K.data)):.3e}")
+    print(f"max |K_ii| = {np.max(np.abs(K.diagonal())):.3e}")
+
+    # density, iterations, u, rhs, logs = density_approach(mesh, volfrac, p=3, outfile=outfile, log=True, max_iter=1000)
 
     if gmsh.isInitialized():
         gmsh.finalize()

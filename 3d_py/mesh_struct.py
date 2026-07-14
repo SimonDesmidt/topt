@@ -3,11 +3,11 @@ import numpy as np
 import scipy.sparse as sp
 
 # Material properties
-E_void = 1        # Young modulus of void [Pa]
-E_matter = 210e9  # Young modulus of steel [Pa]
-nu = 0.3          # Poisson ratio [-]
-rho_matter = 7850 # density of steel [kg/m³]
-gravity = 9.81    # gravity constant [m/s²]
+E_void = 1.0        # Young modulus of void [Pa]
+E_matter = 210e9    # Young modulus of steel [Pa]
+nu = 0.3            # Poisson ratio [-]
+rho_matter = 7850.0 # density of steel [kg/m³]
+gravity = 9.81      # gravity constant [m/s²]
 
 # 3D isotropic constitutive matrix
 C = (1 / ((1 + nu) * (1 - 2 * nu))) * np.array([
@@ -380,6 +380,19 @@ def create_mbb_mesh(width, height, mesh_size, F):
 
     gmsh.option.setNumber("Mesh.MeshSizeMin", mesh_size)
     gmsh.option.setNumber("Mesh.MeshSizeMax", mesh_size)
+    gmsh.option.setNumber("Mesh.Algorithm", 6)
+    gmsh.option.setNumber("Mesh.Algorithm3D", 1)
+    gmsh.option.setNumber("Mesh.RandomSeed", 1)
+    gmsh.option.setNumber("Mesh.RandomFactor", 1e-9)
+    gmsh.option.setNumber("Mesh.RandomFactor3D", 1e-12)
+    gmsh.option.setNumber("General.NumThreads", 1)
+    gmsh.option.setNumber("Mesh.MaxNumThreads1D", 1)
+    gmsh.option.setNumber("Mesh.MaxNumThreads2D", 1)
+    gmsh.option.setNumber("Mesh.MaxNumThreads3D", 1)
+    gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 0)
+    gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 1)
+    gmsh.option.setNumber("Mesh.ElementOrder", 1)
+    gmsh.option.setNumber("Mesh.Reproducible", 1)
     gmsh.model.mesh.generate(3)
 
     # Get all volume nodes, including boundary nodes
@@ -578,6 +591,7 @@ def create_lbracket_mesh(width, height, mesh_size, F, leg_frac=0.4):
     if len(load_nodes) == 0:
         raise RuntimeError("No nodes found on the tip load edge.")
 
+    gmsh.write("python_mesh.msh")
     if not already_initialized:
         gmsh.finalize()
 
@@ -615,5 +629,51 @@ def create_lbracket_mesh(width, height, mesh_size, F, leg_frac=0.4):
     mesh.r = radius
 
     mesh.boundary_normals, mesh.boundary_tangent_1, mesh.boundary_tangent_2 = boundary_nodes_normals_tangents(mesh.nodes, mesh.elements)
-
     return mesh
+
+if __name__ == "__main__":
+    nodes = np.array([[0,0,0], [1,0,0], [0,1,0], [0,0,1], [1,1,1]])
+    elements = np.array([[0,1,2,3], [1,2,3,4]])
+    mesh = Mesh()
+    mesh.nodes = nodes
+    mesh.elements = elements 
+    print("=== Element volumes ===")
+    for i, element in enumerate(mesh.elements):
+        print(f"element {i}: V = {volume(mesh.nodes[element]):.6f}")
+    # print("\n")
+    
+    print("=== Ke[0] symmetry check ===")
+    Ke = build_all_element_stiffness_matrices(mesh)
+    val = 0.0
+    for i in range(Ke.shape[0]):
+        Keee = Ke[i]
+        val = max(np.linalg.norm(Keee-Keee.T, np.inf), val)
+    print(f"max |Ke - Ke^T| = {val:3e} should be ~0\n")
+    
+    print("=== Global stiffness pattern ===")
+    print(f"nnz (COO, with duplicates from shared face {len(mesh.elements)*144}\n")
+    
+    K, M, r = helmholtz_filter(mesh)
+    size = K.shape[0]
+    nnz = K.getnnz()
+    print("=== Helmholtz filter ===")
+    print(f"  filter radius r = {r:.6f}")
+    print(f"  K_filter: {size}x{size}")
+    K = K.tocoo()
+    for i in range(len(K.data)):
+        print(f"({K.coords[0][i]}, {K.coords[1][i]})     {K.data[i]:.3f}")
+    
+    print("\n=== Boundary normals ===")
+    normals, _, _ = boundary_nodes_normals_tangents(mesh.nodes, mesh.elements)
+    for i in range(len(mesh.nodes)):
+        print(f"node {i}: normal = ({normals[i][0]:.3f}, {normals[i][1]:.3f}, {normals[i][2]:.3f}), |n| = {np.linalg.norm(normals[i])}")
+    print("\n")
+    
+    h = 0.2
+    mesh = create_mbb_mesh(3.0, 1.0, h, -4e6*9.81)
+    print(f"\n=== Mesh with h={h:.3f} ===")
+    print(f"Nodes: {len(mesh.nodes)}")
+    print(f"Node tags: {len(mesh.node_tags)}")
+    print(f"Elements: {len(mesh.elements)}")
+    print(f"Load nodes: {len(mesh.neumann)}")
+    print(f"Support nodes: {len(mesh.dirichlet)}")
