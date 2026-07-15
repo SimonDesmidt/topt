@@ -350,7 +350,7 @@ if __name__ == "__main__":
     print(f"\nmax |K_ij| = {np.max(np.abs(K.data)):.3e}")
     print(f"max |K_ii| = {np.max(np.abs(K.diagonal())):.3e}")
 
-    # density, iterations, u, rhs, logs = density_approach(mesh, volfrac, p=3, outfile=outfile, log=True, max_iter=1000)
+    density, iterations, u, rhs, logs = density_approach(mesh, volfrac, p=3, outfile=outfile, log=True, max_iter=1000)
 
     if gmsh.isInitialized():
         gmsh.finalize()

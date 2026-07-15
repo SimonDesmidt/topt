@@ -70,13 +70,11 @@ static void accumulate_derivative_recursive(int start, int depth, int p, int tup
                     int exponent = multiplicities[variable] - (variable == local_node ? 1 : 0);
                     if (exponent > 0) term *= integer_power(density_element[4 * element + variable], exponent);
                 }
-
                 derivative[4 * element + local_node] += term;
             }
         }
         return;
     }
-
     for (int value = start; value < 4; value++) {
         tuple[depth] = value;
         accumulate_derivative_recursive(value, depth + 1, p, tuple, density_element, num_elements, derivative);
@@ -183,10 +181,10 @@ static int build_density_elements(const Mesh *mesh, const double density[], doub
 
 static int assemble_rhs(const Mesh *mesh, const double density_element[], double rhs[]) {
     static const double mass_pattern[4][4] = {
-        {2.0 / 20.0, 1.0 / 20.0, 1.0 / 20.0, 1.0 / 20.0},
-        {1.0 / 20.0, 2.0 / 20.0, 1.0 / 20.0, 1.0 / 20.0},
-        {1.0 / 20.0, 1.0 / 20.0, 2.0 / 20.0, 1.0 / 20.0},
-        {1.0 / 20.0, 1.0 / 20.0, 1.0 / 20.0, 2.0 / 20.0}
+        {0.10, 0.05, 0.05, 0.05},
+        {0.05, 0.10, 0.05, 0.05},
+        {0.05, 0.05, 0.10, 0.05},
+        {0.05, 0.05, 0.05, 0.10}
     };
 
     const int num_dofs = 3 * mesh->num_nodes;
@@ -390,208 +388,4 @@ void fem_result_free(FemResult *result) {
     free(result->K.col_idx);
     free(result->K.val);
     memset(result, 0, sizeof(*result));
-}
-
-
-int main(int argc, char **argv) {
-
-    printf("\nTests for barycentric integral\n");
-    const size_t numEl = 2;
-    const int p = 3;
-
-    double density_element[] = {
-        0.2, 0.4, 0.7, 1.0,
-        0.1, 0.3, 0.5, 0.8};
-
-    double average[numEl];
-
-    if (!barycentric_integral(density_element, numEl, p, average)) {
-        return 1;
-    }
-    printf("[");
-    for (size_t element = 0; element < numEl; element++) {
-        printf("%.5f ", average[element]);
-    }
-    printf("]\n\n");
-
-    printf("\nTests for barycentric integral derivative\n");
-    double derivative[4*numEl];
-    if (!barycentric_integral_derivative(density_element, numEl, p, derivative)){
-        return 1;
-    }
-    
-    for (size_t element = 0; element < numEl; element++){
-        printf("[");
-        for (int node=0; node<4; node++){
-            printf("%.4f ", derivative[4*element+node]);
-        }
-        printf("]\n");
-    }
-    printf("\n");
-
-    int ierr = 0;
-    gmshInitialize(argc, argv, 1, &ierr);
-
-    if (ierr != 0) {
-        fprintf(stderr, "Could not initialize Gmsh.\n");
-        return EXIT_FAILURE;
-    }
-
-    Mesh mesh = {0};
-
-    if (create_mbb_mesh(3.0, 1.0, 0.1, -4e6*9.81, &mesh) != 0) {
-        gmshFinalize(&ierr);
-        return EXIT_FAILURE;
-    }
-
-    double *density = malloc((size_t)mesh.num_nodes * sizeof(*density));
-
-    if (density == NULL) {
-        mesh_free(&mesh);
-        gmshFinalize(&ierr);
-        return EXIT_FAILURE;
-    }
-
-    for (int node = 0; node < mesh.num_nodes; node++) {
-        density[node] = 1.0;
-    }
-
-    double expected_gravity = 0.0;
-
-    for (int element = 0; element < mesh.num_elements; element++) {
-        double mean_density = 0.0;
-
-        for (int local_node = 0; local_node < 4; local_node++) {
-            int global_node = mesh.elements[element][local_node];
-            mean_density += density[global_node];
-        }
-
-        mean_density *= 0.25;
-        expected_gravity -= rho_matter * gravity * mesh.volumes[element] * mean_density;
-    }
-
-    FemResult fem = {0};
-
-    if (!fem_solver(&mesh, density, 3, &fem)) {
-        fprintf(stderr, "FEM solve failed.\n");
-        free(density);
-        mesh_free(&mesh);
-        gmshFinalize(&ierr);
-        return EXIT_FAILURE;
-    }
-
-    printf("\nNumber of nodes: %d\n", mesh.num_nodes);
-    printf("Number of DOFs: %d\n", fem.num_dofs);
-    printf("Number of DOFs per node: %f\n", (double)fem.num_dofs/(double)mesh.num_nodes);
-    printf("K nnz: %d\n\n", fem.K.nnz);
-
-    double ux_max = 0;
-    double uy_max = 0;
-    double uz_max = 0;   
-    for (int node = 0; node < mesh.num_nodes; node++) {
-        if (fabs(fem.u[3*node]) > ux_max) ux_max = fabs(fem.u[3*node]);
-        if (fabs(fem.u[3*node+1]) > uy_max) uy_max = fabs(fem.u[3*node+1]);
-        if (fabs(fem.u[3*node+2]) > uz_max) uz_max = fabs(fem.u[3*node+2]);
-    }
-
-    printf("max |u_x| = %.3e\n", ux_max);
-    printf("max |u_y| = %.3e\n", uy_max);
-    printf("max |u_z| = %.3e\n", uz_max);
-
-    printf("Number of Dirichlet BC nodes: %d\n", mesh.num_dirichlet);
-    printf("Number of Neumann BC nodes: %d\n", mesh.num_neumann);
-
-    double rhs_x = 0.0;
-    double rhs_y = 0.0;
-    double rhs_z = 0.0;
-    double rhs_norm_squared = 0.0;
-
-    for (int node = 0; node < mesh.num_nodes; node++) {
-        rhs_x += fem.rhs[3 * node];
-        rhs_y += fem.rhs[3 * node + 1];
-        rhs_z += fem.rhs[3 * node + 2];
-
-        rhs_norm_squared += fem.rhs[3 * node] * fem.rhs[3 * node];
-        rhs_norm_squared += fem.rhs[3 * node + 1] * fem.rhs[3 * node + 1];
-        rhs_norm_squared += fem.rhs[3 * node + 2] * fem.rhs[3 * node + 2];
-    }
-
-    printf("\nsum rhs x: %.3e\n", rhs_x);
-    printf("sum rhs y: %.3e\n", rhs_y);
-    printf("sum rhs z: %.3e\n", rhs_z);
-    printf("norm rhs: %.3e\n", sqrt(rhs_norm_squared));
-
-    double residual_norm_squared = 0.0;
-    double rhs_norm_squared_free = 0.0;
-
-    for (int row = 0; row < fem.K.rows; row++) {
-        int is_fixed = 0;
-
-        for (int condition_id = 0; condition_id < mesh.num_dirichlet; condition_id++) {
-            int node = mesh.dirichlet[condition_id].node;
-            int component = row % 3;
-
-            if (row / 3 == node && mesh.dirichlet[condition_id].constrained[component]) {
-                is_fixed = 1;
-                break;
-            }
-        }
-
-        if (is_fixed) continue;
-
-        double Ku = 0.0;
-
-        for (int k = fem.K.row_ptr[row]; k < fem.K.row_ptr[row + 1]; k++) {
-            Ku += fem.K.val[k] * fem.u[fem.K.col_idx[k]];
-        }
-
-        double residual = Ku - fem.rhs[row];
-        residual_norm_squared += residual * residual;
-        rhs_norm_squared_free += fem.rhs[row] * fem.rhs[row];
-    }
-
-    double relative_residual = sqrt(residual_norm_squared) / fmax(sqrt(rhs_norm_squared_free), 1e-30);
-    printf("\nrelative free-DOF residual = %.3e\n\n", relative_residual);
-
-    double actual_gravity_plus_external = 0.0;
-
-    for (int node = 0; node < mesh.num_nodes; node++) {
-        actual_gravity_plus_external += fem.rhs[3 * node + 2];
-    }
-
-    double external_force = 0.0;
-
-    for (int condition = 0; condition < mesh.num_neumann; condition++) {
-        external_force += mesh.neumann[condition].force[2];
-    }
-
-    printf("expected gravity   = %.3e\n", expected_gravity);
-    printf("actual gravity     = %.3e\n", actual_gravity_plus_external - external_force);
-
-    double K_max = 0.0;
-    double K_diag_max = 0.0;
-
-    for (int row = 0; row < fem.K.rows; row++) {
-        for (int k = fem.K.row_ptr[row]; k < fem.K.row_ptr[row + 1]; k++) {
-            double value = fabs(fem.K.val[k]);
-
-            if (value > K_max) {
-                K_max = value;
-            }
-
-            if (fem.K.col_idx[k] == row && value > K_diag_max) {
-                K_diag_max = value;
-            }
-        }
-    }
-
-    printf("\nmax |K_ij|  = %.3e\n", K_max);
-    printf("max |K_ii|  = %.3e\n", K_diag_max);
-
-    fem_result_free(&fem);
-    free(density);
-    mesh_free(&mesh);
-    gmshFinalize(&ierr);
-
-    return EXIT_SUCCESS;
 }

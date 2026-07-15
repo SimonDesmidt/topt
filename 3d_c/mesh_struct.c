@@ -590,7 +590,6 @@ static int *intersect_node_sets(const int *set_a, int size_a, const int *set_b, 
     for (int node_id = 0; node_id < num_nodes; node_id++) if (in_a[node_id] && in_b[node_id]) count++;
 
     int *intersection = malloc((size_t)count * sizeof(*intersection));
-
     if (intersection == NULL && count > 0) {
         free(in_a);
         free(in_b);
@@ -599,7 +598,6 @@ static int *intersect_node_sets(const int *set_a, int size_a, const int *set_b, 
     }
 
     int index = 0;
-
     for (int node_id = 0; node_id < num_nodes; node_id++) if (in_a[node_id] && in_b[node_id]) intersection[index++] = node_id;
 
     free(in_a);
@@ -731,10 +729,7 @@ int create_mbb_mesh(double width, double height, double mesh_size, double total_
     gmshModelMeshGenerate(3, &ierr);
     if (check_gmsh_error(ierr, "gmshModelMeshGenerate") != 0) goto fail_surfaces;
 
-    /*
-     * Get every Node belonging to the volume, including nodes classified
-     * on its boundary.
-     */
+    // Get every Node belonging to the volume, including nodes classified on its boundary
     size_t *gmsh_node_tags = NULL;
     size_t gmsh_node_tags_n = 0;
     double *gmsh_coordinates = NULL;
@@ -792,9 +787,7 @@ int create_mbb_mesh(double width, double height, double mesh_size, double total_
     gmshFree(gmsh_coordinates);
     gmshFree(parametric_coordinates);
 
-    /*
-     * Extract 4-Node first-order tetrahedra.
-     */
+    // Extract 4-Node first-order tetrahedra.
     int *element_types = NULL;
     size_t element_types_n = 0;
 
@@ -833,11 +826,7 @@ int create_mbb_mesh(double width, double height, double mesh_size, double total_
             goto fail_elements;
         }
 
-        int is_linear_tetrahedron =
-            element_dimension == 3 &&
-            element_order == 1 &&
-            num_element_nodes == 4 &&
-            num_primary_nodes == 4;
+        int is_linear_tetrahedron = element_dimension == 3 && element_order == 1 && num_element_nodes == 4 && num_primary_nodes == 4;
 
         gmshFree(element_name);
         gmshFree(local_coordinates);
@@ -883,9 +872,7 @@ int create_mbb_mesh(double width, double height, double mesh_size, double total_
         }
     }
 
-    /*
-     * Convert physical-group Node tags to zero-based local indices.
-     */
+    // Convert physical-group Node tags to zero-based local indices.
     if (physical_group_node_indices(2, pleft, tag_to_index, max_node_tag, &mesh->left_nodes, &mesh->num_left_nodes) != 0) {
         free(tag_to_index);
         goto fail_elements;
@@ -922,9 +909,7 @@ int create_mbb_mesh(double width, double height, double mesh_size, double total_
         goto fail_elements;
     }
 
-    /*
-     * Release arrays returned by gmshModelMeshGetElements.
-     */
+    // Release arrays returned by gmshModelMeshGetElements.
     for (size_t i = 0; i < element_tags_nn; i++) gmshFree(element_tags[i]);
     for (size_t i = 0; i < element_node_tags_nn; i++) gmshFree(element_node_tags[i]);
 
@@ -940,9 +925,7 @@ int create_mbb_mesh(double width, double height, double mesh_size, double total_
     element_node_tags = NULL;
     element_node_tags_n = NULL;
 
-    /*
-     * Build element volumes, B matrices, stiffness matrices and DOF maps.
-     */
+    // Build element volumes, B matrices, stiffness matrices and DOF maps.
     double C[6][6];
     constitutive_matrix(NU, C);
     build_element_stiffness(mesh, C);
@@ -1015,9 +998,7 @@ int create_mbb_mesh(double width, double height, double mesh_size, double total_
         mesh->neumann[i].force[2] = nodal_force;
     }
 
-    /*
-     * Helmholtz filter and boundary directions.
-     */
+    // Helmholtz filter and boundary directions.
     helmholtz_filter(mesh, &mesh->stiff_matrix, &mesh->mass_matrix, &mesh->r);
     boundary_nodes_normals_tangents(mesh);
     
@@ -1048,113 +1029,3 @@ fail_surfaces:
 
     return -1;
 }
-
-/* ---------------- demo / self-test ---------------- */
-
-// int main(int argc, char **argv) {
-//     /* Two tetrahedra sharing one face, forming a small bipyramid.
-//      * Nodes: 0=(0,0,0) 1=(1,0,0) 2=(0,1,0) 3=(0,0,1) 4=(1,1,1)
-//      * Tet A: 0,1,2,3   Tet B: 1,2,3,4   (shared face 1,2,3) */
-//     Node nodes[5] = {
-//         {0,0,0}, {1,0,0}, {0,1,0}, {0,0,1}, {1,1,1}
-//     };
-//     int elements[2][4] = {
-//         {0, 1, 2, 3},
-//         {1, 2, 3, 4}
-//     };
-
-//     Mesh mesh = {0};
-//     mesh.num_nodes = 5;
-//     mesh.num_elements = 2;
-//     mesh.nodes = nodes;
-//     mesh.elements = elements;
-
-//     double C[6][6];
-//     constitutive_matrix(NU, C);
-
-//     build_element_stiffness(&mesh, C);
-//     build_edof_matrix(&mesh);
-
-//     printf("=== Element volumes ===\n");
-//     for (int e = 0; e < mesh.num_elements; e++)
-//         printf("  element %d: V = %.6f\n", e, mesh.volumes[e]);
-
-//     printf("\n=== Ke[0] symmetry check ===\n");
-//     double max_asym = 0.0;
-//     for (int i = 0; i < 12; i++)
-//         for (int j = 0; j < 12; j++) {
-//             double diff = fabs(mesh.Ke[0][i][j] - mesh.Ke[0][j][i]);
-//             if (diff > max_asym) max_asym = diff;
-//         }
-//     printf("  max |Ke - Ke^T| = %.3e (should be ~0)\n", max_asym);
-
-//     printf("\n=== Global stiffness pattern ===\n");
-//     printf("  nnz (COO, with duplicates from shared face) = %d\n", mesh.num_elements * 144);
-
-//     CsrMatrix K_filter, M_filter;
-//     double r;
-//     helmholtz_filter(&mesh, &K_filter, &M_filter, &r);
-//     printf("\n=== Helmholtz filter ===\n");
-//     printf("  filter radius r = %.6f\n", r);
-//     printf("  K_filter: %d x %d\n", K_filter.rows, K_filter.cols);
-//     for (int row=0; row<K_filter.rows; row++){
-//         for (int k=K_filter.row_ptr[row]; k<K_filter.row_ptr[row+1]; k++){
-//             int col = K_filter.col_idx[k];
-//             double value = K_filter.val[k];
-//             printf("(%d, %d)    %.3f\n", row, col, value);
-//         }
-//     }
-
-//     boundary_nodes_normals_tangents(&mesh);
-//     printf("\n=== Boundary normals ===\n");
-//     for (int n = 0; n < mesh.num_nodes; n++) {
-//         Node nrm = mesh.boundary_normals[n];
-//         printf("  Node %d: normal = (%.3f, %.3f, %.3f), |n| = %.3f\n",
-//                n, nrm.x, nrm.y, nrm.z, vnorm(nrm));
-//     }
-//     printf("\n\n");
-
-//     csr_free(&K_filter);
-//     csr_free(&M_filter);
-//     free(mesh.volumes);
-//     free(mesh.B_matrices);
-//     free(mesh.Ke);
-//     free(mesh.edofMat);
-//     free(mesh.iK);
-//     free(mesh.jK);
-//     free(mesh.sK_unit);
-//     free(mesh.boundary_normals);
-//     free(mesh.boundary_tangent_1);
-//     free(mesh.boundary_tangent_2);
-
-
-//     int ierr = 0;
-
-//     gmshInitialize(argc, argv, 1, &ierr);
-
-//     if (ierr != 0) {
-//         fprintf(stderr, "gmshInitialize failed with error %d\n", ierr);
-//         return EXIT_FAILURE;
-//     }
-
-//     Mesh mesh2 = {0};
-//     double width = 3.0; 
-//     double height = 1.0;
-//     double h = 0.04;
-
-//     if (create_mbb_mesh(width, height, h, -4000.0 * 9.81, &mesh2) != 0) {
-//         gmshFinalize(&ierr);
-//         return EXIT_FAILURE;
-//     }
-
-//     printf("\n=== Mesh with h=%.3f ===\n", h);
-//     printf("Nodes: %d\n", mesh2.num_nodes);
-//     printf("Elements: %d\n", mesh2.num_elements);
-//     printf("Load nodes: %d\n", mesh2.num_neumann);
-//     printf("Support nodes: %d\n", mesh2.num_dirichlet);
-
-//     mesh_free(&mesh2);
-//     gmshFinalize(&ierr);
-
-//     return EXIT_SUCCESS;
-// }
